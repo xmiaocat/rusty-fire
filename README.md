@@ -11,6 +11,7 @@ using any images.
 The project in still under development and some improvements 
 are planned:
 
+- User interface for settings
 - Colors
 - Different cooling maps
 - [Warp Feedback](https://web.archive.org/web/20160418004150/http://freespace.virgin.net/hugo.elias/graphics/x_warp.htm)
