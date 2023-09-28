@@ -1,4 +1,10 @@
+mod configs;
+mod defaults;
+mod color_maps;
+mod color_map_listed;
+
 use std::collections::VecDeque;
+use std::vec;
 use noise::{Fbm, NoiseFn, Perlin};
 use macroquad::window::{
     Conf, next_frame, screen_height, screen_width,
@@ -6,32 +12,31 @@ use macroquad::window::{
 use macroquad::texture::{Image, Texture2D, draw_texture};
 use macroquad::text::draw_text;
 use macroquad::color::{Color, colors};
-use macroquad::rand::{srand, rand};
+use macroquad::rand::{srand, rand, gen_range};
 use macroquad::time::{get_fps};
+use crate::color_maps::{ValueToColor, Gray, Inferno, Magma};
+use crate::configs::FireConfigs;
+use crate::defaults::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH};
 
-const DEFAULT_N_FIRE_ROW: usize = 50;
-const DEFAULT_COOLING_LENGTH_SCALE: f64 = 0.02;
-const DEFAULT_COOLING_STRENGTH: f64 = 0.15;
-
-fn val_to_color(val: u8) -> Color {
-    Color::from_rgba(
-        val,
-        val,
-        val,
-        255,
-    )
+fn value_to_color(
+    color_map: &impl ValueToColor,
+    value: u8,
+    alpha: Option<u8>,
+) -> Color {
+    color_map.value_to_color(value, alpha)
 }
 
-fn add_heat_to_buffer(
+fn heat_buffer(
     buf: &mut [u8],
     w: usize,
     h: usize,
-    n_row: usize,
+    fire_positions: &[bool],
 ) {
     // add new fire points
     for x in 0..w {
-        for j in 0..n_row {
-            buf[x + (h - j - 1) * w] = 255;
+        if fire_positions[x] {
+            buf[x + (h - 2) * w] = 255;
+            buf[x + (h - 1) * w] = 255;
         }
     }
 }
@@ -43,6 +48,7 @@ fn smooth_and_cool(
     h: usize,
     yshift: usize,
     cooling_map: &VecDeque<u8>,
+    fire_height: usize,
 ) -> () {
     for x in 1..(w - 1) {
         for y in 1..(h - 1) {
@@ -56,25 +62,28 @@ fn smooth_and_cool(
                     + u16::from(original[(x + 1) + y * w])
                 // + u16::from(original[x + y * w])
             ) / 4).unwrap();
-            let cooling_val = *cooling_map.get(x + y * w).unwrap();
-            if new_val > cooling_val {
-                new_val -= cooling_val;
-            } else {
-                new_val = 0;
+            if y < (h - fire_height) {
+                let cooling_val = *cooling_map.get(x + y * w).unwrap();
+                if new_val > cooling_val {
+                    new_val -= cooling_val;
+                } else {
+                    new_val = 0;
+                }
             }
+
             new[x + (y - yshift) * w] = new_val;
         }
     }
 }
 
-fn initialise_cooling_map_buffer(
+fn initialise_cooling_map(
     w: usize,
     h: usize,
     rng: &impl NoiseFn<f64, 2>,
     increment: f64,
     scale: f64,
 ) -> VecDeque<u8> {
-    let mut xoff = 0.0;
+    let mut xoff: f64;
     let mut yoff = 0.0;
     let mut cm_buf = VecDeque::with_capacity(w * h);
     for _y in 0..h {
@@ -90,7 +99,7 @@ fn initialise_cooling_map_buffer(
     cm_buf
 }
 
-fn update_cooling_map_buffer(
+fn update_cooling_map(
     buf: &mut VecDeque<u8>,
     w: usize,
     h: usize,
@@ -115,104 +124,113 @@ fn update_cooling_map_buffer(
 fn conf() -> Conf {
     Conf {
         window_title: "Fire Simulator".to_string(),
-        window_width: 600,
-        window_height: 400,
+        window_width: DEFAULT_WINDOW_WIDTH,
+        window_height: DEFAULT_WINDOW_HEIGHT,
         fullscreen: false,
         window_resizable: false,
         ..Default::default()
     }
 }
 
-struct CoolingMapSettings {
-    seed: Option<u32>,
-    length_scale: f64,
-    strength: f64,
-}
-
-impl CoolingMapSettings {
-    fn new(seed: Option<u32>, length_scale: f64, strength: f64) -> Self {
-        Self {
-            seed,
-            length_scale,
-            strength,
-        }
-    }
-
-    fn default() -> Self {
-        Self {
-            seed: None,
-            length_scale: DEFAULT_COOLING_LENGTH_SCALE,
-            strength: DEFAULT_COOLING_STRENGTH,
-        }
-    }
-}
-
-
-
 #[macroquad::main(conf)]
 async fn main() {
+    // Load configurations
+    let mut fire_configs = FireConfigs::default();
+
+    // TODO: Properly handle colormaps
+    fire_configs.set_color_map_name(String::from("magma"));
+    // let color_map: ColorMap = match fire_configs.color_map_name.to_ascii_lowercase().as_str() {
+    //     "gray" => Gray::new(),
+    //     "magma" => Magma::new(),
+    //     "inferno" => Inferno::new(),
+    //     _ => Gray::new(),
+    // };
+    let color_map = Magma::new();
+
+    // Define convenience variables
     let w = screen_width() as usize;
     let h = screen_height() as usize;
 
-    let n_fire_row = DEFAULT_N_FIRE_ROW;
-    let cooling_map_settings = CoolingMapSettings::default();
+    // Seed rngs
+    if fire_configs.seed.is_some() {
+        srand(fire_configs.seed.unwrap());
+    }
+    let cooling_map_rng: Fbm<Perlin> = Fbm::<Perlin>::new(rand());
 
-    srand(42);
-    let cm_seed = if cooling_map_settings.seed.is_some() {
-        cooling_map_settings.seed.unwrap()
-    } else {
-        rand()
-    };
-
-    let rng: Fbm<Perlin> = Fbm::<Perlin>::new(cm_seed);
-
-    let mut ystart: f64 = 0.0;
-
+    // Initialise buffers
+    let mut fire_position: Vec<bool> = Vec::with_capacity(w);
     let mut buf = vec![0u8; w * h];
     let mut buf_new = vec![0u8; w * h];
-    let mut cm_buf = initialise_cooling_map_buffer(
+    let mut cooling_map = initialise_cooling_map(
         w,
         h,
-        &rng,
-        cooling_map_settings.length_scale,
-        cooling_map_settings.strength,
+        &cooling_map_rng,
+        fire_configs.cooling_map_configs.length_scale,
+        fire_configs.cooling_map_configs.strength,
     );
 
+    // Get fire positions
+    for _ in 0..w {
+        let rand_num = gen_range(0, 99);
+        if rand_num < fire_configs.fill_percentage {
+            fire_position.push(true);
+        } else {
+            fire_position.push(false);
+        }
+    }
+
+    // Initialise image and texture
     let mut image = Image::gen_image_color(w as u16, h as u16, colors::BLACK);
     let texture = Texture2D::from_image(&image);
 
-    add_heat_to_buffer(&mut buf, w, h, n_fire_row);
+    // Start fire
+    heat_buffer(&mut buf, w, h, &fire_position);
 
+    // Initialise running variable
+    let mut ystart: f64 = 0.0;
     loop {
         // std::thread::sleep(std::time::Duration::from_millis(200));
 
-        // smooth buffer values
-        smooth_and_cool(&buf, &mut buf_new, w, h, 1, &cm_buf);
+        // Perform smoothing and cooling
+        smooth_and_cool(
+            &buf,
+            &mut buf_new,
+            w,
+            h,
+            1,
+            &cooling_map,
+            fire_configs.base_height,
+        );
 
-        add_heat_to_buffer(&mut buf_new, w, h, n_fire_row);
+        heat_buffer(&mut buf_new, w, h, &fire_position);
 
-        // convert buf2 to image by mapping values to colors
+        // convert buf_new to image by mapping values to colors
         image.update(
-            (buf_new.iter().map(|&val| val_to_color(val)).collect::<Vec<_>>()).as_slice()
+            (
+                buf_new.iter().map(
+                    |&val| color_map.value_to_color(val, None)
+                ).collect::<Vec<_>>()
+            ).as_slice()
         );
 
         // update and draw texture
         texture.update(&image);
         draw_texture(&texture, 0.0, 0.0, colors::WHITE);
 
+        // draw fps for debugging
         draw_text(format!("FPS: {}", get_fps()).as_str(), 0., 16., 32., colors::WHITE);
 
         // update cooling map buffer
-        update_cooling_map_buffer(
-            &mut cm_buf,
+        update_cooling_map(
+            &mut cooling_map,
             w,
             h,
-            &rng,
-            cooling_map_settings.length_scale,
-            cooling_map_settings.strength,
+            &cooling_map_rng,
+            fire_configs.cooling_map_configs.length_scale,
+            fire_configs.cooling_map_configs.strength,
             ystart,
         );
-        ystart += cooling_map_settings.length_scale;
+        ystart += fire_configs.cooling_map_configs.length_scale;
 
         // update image buffer
         buf.copy_from_slice(&buf_new);
