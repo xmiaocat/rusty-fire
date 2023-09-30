@@ -14,17 +14,10 @@ use macroquad::text::draw_text;
 use macroquad::color::{Color, colors};
 use macroquad::rand::{srand, rand, gen_range};
 use macroquad::time::{get_fps};
-use crate::color_maps::{ValueToColor, Gray, Inferno, Magma};
+use crate::color_map_listed::{INFERNO_LUT, MAGMA_LUT, PLASMA_LUT, VIRIDIS_LUT};
+use crate::color_maps::{ValueToColor, GrayColorMap, ListedColorMap};
 use crate::configs::FireConfigs;
 use crate::defaults::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH};
-
-fn value_to_color(
-    color_map: &impl ValueToColor,
-    value: u8,
-    alpha: Option<u8>,
-) -> Color {
-    color_map.value_to_color(value, alpha)
-}
 
 fn heat_buffer(
     buf: &mut [u8],
@@ -92,7 +85,7 @@ fn initialise_cooling_map(
         for _x in 0..w {
             xoff += increment;
             let n = rng.get([xoff, yoff]);
-            let val = ((n * 0.5 + 0.5).clamp(0.0, 1.0).powf(1.0) * scale * 255.0).round() as u8;
+            let val = ((n * 0.5 + 0.5).clamp(0.0, 1.0).powf(3.0) * scale * 255.0).round() as u8;
             cm_buf.push_back(val);
         }
     }
@@ -139,13 +132,14 @@ async fn main() {
 
     // TODO: Properly handle colormaps
     fire_configs.set_color_map_name(String::from("magma"));
-    // let color_map: ColorMap = match fire_configs.color_map_name.to_ascii_lowercase().as_str() {
-    //     "gray" => Gray::new(),
-    //     "magma" => Magma::new(),
-    //     "inferno" => Inferno::new(),
-    //     _ => Gray::new(),
-    // };
-    let color_map = Magma::new();
+    let color_map: Box<dyn ValueToColor> = match fire_configs.color_map_name.to_ascii_lowercase().as_str() {
+        "gray" => Box::new(GrayColorMap::new()),
+        "magma" => Box::new(ListedColorMap::new(MAGMA_LUT)),
+        "inferno" => Box::new(ListedColorMap::new(INFERNO_LUT)),
+        "plasma" => Box::new(ListedColorMap::new(PLASMA_LUT)),
+        "viridis" => Box::new(ListedColorMap::new(VIRIDIS_LUT)),
+        _ => Box::new(GrayColorMap::new()),
+    };
 
     // Define convenience variables
     let w = screen_width() as usize;

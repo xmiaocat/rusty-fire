@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import numpy as np
-from matplotlib._cm_listed import _magma_data, _inferno_data
+from matplotlib._cm_listed import _magma_data, _inferno_data, _plasma_data, _viridis_data
 
 
 def write_cmap(f, cmap_array, cmap_name):
@@ -13,8 +13,12 @@ def write_cmap(f, cmap_array, cmap_name):
 
 magma_array = np.array(_magma_data)
 inferno_array = np.array(_inferno_data)
+plasma_array = np.array(_plasma_data)
+viridis_array = np.array(_viridis_data)
 
 with open('src/color_map_listed.rs', 'w') as f:
     write_cmap(f, magma_array, 'magma')
     write_cmap(f, inferno_array, 'inferno')
+    write_cmap(f, plasma_array, 'plasma')
+    write_cmap(f, viridis_array, 'viridis')
 
