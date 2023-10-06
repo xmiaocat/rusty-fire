@@ -1,5 +1,4 @@
 use macroquad::color::{Color};
-use crate::color_map_listed::{INFERNO_LUT, MAGMA_LUT};
 
 pub trait ValueToColor {
     fn value_to_color(&self, value: u8, alpha: Option<u8>) -> Color;

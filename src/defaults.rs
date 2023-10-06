@@ -1,5 +1,5 @@
-pub const DEFAULT_WINDOW_WIDTH: i32 = 600;
-pub const DEFAULT_WINDOW_HEIGHT: i32 = 400;
+pub const DEFAULT_WINDOW_WIDTH: i32 = 640;
+pub const DEFAULT_WINDOW_HEIGHT: i32 = 360;
 
 pub const DEFAULT_FILL_PERCENTAGE: u8 = 95;
 pub const DEFAULT_FIRE_BASE_HEIGHT: usize = 20;
